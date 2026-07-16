@@ -1,0 +1,22 @@
+# Environment variables
+.env
+src/.env
+
+# Python cache
+__pycache__/
+*.pyc
+
+# Database
+*.db
+
+# Logs
+*.log
+
+# Output files
+output/
+
+# VS Code
+.vscode/
+
+# macOS
+.DS_Store

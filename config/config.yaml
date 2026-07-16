@@ -1,0 +1,31 @@
+# Instagram Engagement Scraper Configuration - Phase 2
+
+# Search settings
+keyword: "lifestyle"  # Keyword to search on Instagram
+number_of_initial_posts_to_scan: 10 # Number of initial posts to scan for Phase-1 criteria
+
+# Creator analysis settings
+posts_per_creator: 5  # Number of posts to analyze per creator (after finding a passing post)
+
+# Engagement criteria
+minimum_comments_required: 50  # Minimum number of comments required for qualification
+minimum_text_percentage_required: 50  # Minimum text-based percentage required
+
+# Scrolling settings
+scroll_delay_range: [2, 4]  # Random delay range in seconds for scrolling
+
+# Login credentials (optional - can also use .env file)
+login:
+  username: ""  # Leave empty to use INSTAGRAM_USERNAME from .env
+  password: ""  # Leave empty to use INSTAGRAM_PASSWORD from .env
+
+# Browser settings
+browser:
+  headless: false  # Run browser in headless mode (true/false)
+  slow_mode: 2  # Additional delay in seconds between actions (helps avoid detection)
+
+# Output paths
+output:
+  posts_csv: "output/posts.csv"  # Path to posts CSV file
+  creators_csv: "output/creators.csv"  # Path to creators CSV file
+
