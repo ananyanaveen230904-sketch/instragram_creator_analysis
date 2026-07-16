@@ -1,293 +1,300 @@
-# Instagram Engagement Scraper - Phase 2
+# Instagram Creator Analysis
 
-A Python + Selenium tool that automatically searches Instagram, extracts comments from posts, classifies them, calculates Engagement Quality Scores (EQS), and provides creator-level analytics.
+A Python toolkit that scrapes Instagram posts and comments, scores creators on
+**engagement quality**, layers on a transformer-based **sentiment** signal,
+and serves everything through an interactive **Streamlit dashboard** with
+natural-language Q&A powered by Gemini.
 
-## Project Overview
+The project has three stages that build on each other:
 
-This tool automates the process of:
+| Stage | What it does | Key scripts |
+|---|---|---|
+| **1. Scraping** | Logs into Instagram, searches a keyword, collects posts, extracts comments | `src/scraper.py`, `src/creator_analyzer.py` |
+| **2. Engagement scoring** | Classifies comments (text / emoji / mixed) and computes an Engagement Quality Score (EQS) per post and per creator | `src/comment_classifier.py`, `src/post_analyzer.py` |
+| **3. Sentiment + GenAI layer** | Compares regex vs. transformer sentiment, builds a sentiment-adjusted EQS, loads everything into SQLite, and exposes a dashboard with LLM-powered Q&A | `src/sentiment_classifier.py`, `src/run_comparison.py`, `src/build_sentiment_eqs.py`, `src/db_setup.py`, `src/query_engine.py`, `dashboard.py` |
 
-### Phase 1: Initial Post Discovery
-1. Searching Instagram for a keyword (default: "lifestyle")
-2. Collecting post URLs from search/explore results
-3. Extracting comments from each post
-4. Classifying comments into:
-   - **Text comments**: Contains letters/numbers but no emojis
-   - **Emoji-only comments**: Contains only emojis
-   - **Mixed comments**: Contains both emojis and text
-5. Determining whether posts qualify as "high text-based engagement"
-   - Must have ≥ minimum required comments (default: 50)
-   - At least 50% comments must be text-based
+---
 
-### Phase 2: Creator Analysis
-6. For each post that passes Phase-1 criteria:
-   - Opens the creator's profile
-   - Fetches their latest N posts (default: 5)
-   - Runs full analysis on each post (comment extraction + classification + EQS)
-7. Calculates Engagement Quality Score (EQS) for every post
-8. Generates creator-level summaries
-9. Saves results to two CSV files: `posts.csv` and `creators.csv`
+## How it works
 
-## Engagement Quality Score (EQS)
+### Stage 1 — Scraping (`scraper.py`)
 
-EQS is calculated using the following formula:
+1. Logs into Instagram with your credentials
+2. Searches for a configured keyword (default: `"lifestyle"`)
+3. Collects an initial batch of post URLs
+4. Extracts comments from each post and classifies them as:
+   - **Text** — letters/numbers, no emoji
+   - **Emoji** — emoji only
+   - **Mixed** — both
+5. Flags a post as "high text-based engagement" if it has at least
+   `minimum_comments_required` comments **and** at least
+   `minimum_text_percentage_required`% of them are text-based
+6. For every post that passes, opens the creator's profile and analyzes
+   their latest `posts_per_creator` posts too
+7. Writes `output/posts.csv` (post-level) and `output/creators.csv`
+   (creator-level, aggregated)
 
-```
-EQS = (Text% × 0.6) + (Mixed% × 0.3) - (Emoji% × 0.1) + (Unique commenters ratio × 0.2)
-```
-
-Where:
-- **Text%**: Percentage of text-only comments
-- **Mixed%**: Percentage of mixed comments
-- **Emoji%**: Percentage of emoji-only comments
-- **Unique commenters ratio**: unique_users / total_comments
-
-## Quick Start
-
-```bash
-git clone <repo>
-cd insta-creators
-pip install -r requirements.txt
-cd src
-python scraper.py
-```
-
-## Project Structure
+### Engagement Quality Score (EQS)
 
 ```
-insta-creators/
-├── src/
-│   ├── scraper.py              # Main Phase-2 script
-│   ├── comment_classifier.py  # Comment classification logic
-│   ├── post_analyzer.py        # Post analysis and EQS calculation
-│   ├── creator_analyzer.py    # Creator-level analysis
-│   └── utils.py               # Utility functions
+EQS = (Text% × 0.6) + (Mixed% × 0.3) − (Emoji% × 0.1) + (Unique commenters ratio × 0.2)
+```
+
+- **Text% / Mixed% / Emoji%** — share of comments in each category
+- **Unique commenters ratio** — unique commenters ÷ total comments (a proxy
+  for how many distinct people engaged, vs. a few people commenting repeatedly)
+
+### Stage 2 — Sentiment comparison and sentiment-adjusted EQS
+
+- `sentiment_classifier.py` runs a transformer model
+  (`cardiffnlp/twitter-roberta-base-sentiment-latest`) over the same comments
+  the regex classifier already looked at, labeling each as positive /
+  neutral / negative.
+- `run_comparison.py` runs both classifiers on `output/raw_comments.csv`,
+  flags cases where they disagree, and saves
+  `output/comparison_results.csv`.
+- `build_sentiment_eqs.py` aggregates sentiment percentages per creator and
+  produces a sentiment-adjusted EQS, saved to
+  `output/creators_with_sentiment_eqs.csv`. This is purely additive — it
+  never touches `posts.csv` or `creators.csv`.
+
+### Stage 3 — SQLite + natural-language Q&A
+
+- `db_setup.py` loads every output CSV into a local SQLite database
+  (`output/analytics.db`), one table per CSV. It's idempotent — rerunning it
+  just drops and recreates the tables.
+- `query_engine.py` implements a text-to-SQL RAG pipeline using the **Gemini API**
+  (`gemini-2.5-flash`): it turns a plain-English question into SQL, validates
+  the SQL is read-only/safe, runs it against `analytics.db`, and turns the
+  result back into a plain-English answer.
+- `dashboard.py` is a **Streamlit** app that ties everything together:
+  charts for EQS and sentiment breakdowns, a regex-vs-transformer comparison
+  view, and an "Ask AI" section backed by `query_engine.py`.
+
+---
+
+## Project structure
+
+```
+instragram_creator_analysis/
+├── dashboard.py                  # Streamlit dashboard (entry point for Stage 3)
+├── requirements.txt
 ├── config/
-│   └── config.yaml            # Configuration file
-├── output/
-│   ├── posts.csv              # Post-level results (generated)
-│   └── creators.csv           # Creator-level results (generated)
-├── requirements.txt           # Python dependencies
-├── README.md                  # This file
-└── .env                       # Environment variables (create this)
+│   └── config.yaml               # Scraper + engagement settings
+├── src/
+│   ├── scraper.py                # Main scraping script (Stage 1)
+│   ├── creator_analyzer.py       # Creator profile scraping
+│   ├── comment_classifier.py     # Regex-based text/emoji/mixed classifier
+│   ├── post_analyzer.py          # EQS + sentiment-adjusted EQS calculation
+│   ├── sentiment_classifier.py   # Transformer-based sentiment model
+│   ├── run_comparison.py         # Regex vs. transformer comparison
+│   ├── build_sentiment_eqs.py    # Builds sentiment-adjusted EQS per creator
+│   ├── db_setup.py               # Loads CSV outputs into SQLite
+│   ├── query_engine.py           # Natural-language → SQL → answer (Gemini)
+│   ├── utils.py                  # Shared helpers (config, driver, login, CSV I/O)
+│   └── test_login.py             # Standalone Instagram login test/debug script
+├── output/                       # Generated at runtime (not committed)
+│   ├── posts.csv
+│   ├── creators.csv
+│   ├── raw_comments.csv
+│   ├── comparison_results.csv
+│   ├── creators_with_sentiment_eqs.csv
+│   └── analytics.db
+├── QUICK_START.md
+├── PHASE2_QUICKSTART.md
+├── LOGIN_TROUBLESHOOTING.md
+└── .env                           # Create this yourself — not committed
 ```
 
-## Setup Instructions
+---
 
-### 1. Install Python Dependencies
+## Setup
+
+### 1. Install dependencies
 
 ```bash
 pip install -r requirements.txt
 ```
+
+This includes Selenium (scraping), pandas/pyyaml (data + config),
+transformers/torch (sentiment model), streamlit/plotly (dashboard), and
+google-genai (Gemini Q&A).
 
 ### 2. Install ChromeDriver
 
-The script requires ChromeDriver to be installed and accessible in your PATH.
+Selenium needs a matching ChromeDriver on your `PATH`, plus Chrome itself
+installed.
 
-**Windows:**
-- Download ChromeDriver from https://chromedriver.chromium.org/
-- Extract and add to PATH, or place in the same directory as the script
-- Ensure Chrome browser is installed
+- **Windows**: download from https://chromedriver.chromium.org/, add to
+  `PATH` or place next to the script
+- **macOS**: `brew install chromedriver`
+- **Linux**: `sudo apt-get install chromium-chromedriver`
 
-**macOS:**
-```bash
-brew install chromedriver
-```
-
-**Linux:**
-```bash
-sudo apt-get install chromium-chromedriver
-```
-
-### 3. Create `.env` File
-
-Create a `.env` file in the project root with your Instagram credentials:
+### 3. Create a `.env` file
 
 ```
 INSTAGRAM_USERNAME=your_username
 INSTAGRAM_PASSWORD=your_password
+GEMINI_API_KEY=your_gemini_api_key
 ```
 
-**⚠️ IMPORTANT:** Never commit the `.env` file to version control!
+`GEMINI_API_KEY` is only needed for the "Ask AI" Q&A feature in the
+dashboard (`query_engine.py`); everything else works without it.
 
-Alternatively, you can set credentials in `config/config.yaml` under the `login` section.
+**Never commit `.env` to version control.**
 
-### 4. Configure Settings
+Instagram credentials can alternatively be set under `login:` in
+`config/config.yaml`, but `.env` is recommended.
 
-Edit `config/config.yaml` to customize:
+### 4. Configure `config/config.yaml`
 
 ```yaml
-# Search settings
-keyword: "lifestyle"  # Keyword to search on Instagram
-number_of_initial_posts_to_scan: 20  # Number of initial posts to scan
+keyword: "lifestyle"                       # keyword to search
+number_of_initial_posts_to_scan: 10        # posts scanned in Stage 1
+posts_per_creator: 5                       # posts analyzed per creator in Stage 2
+minimum_comments_required: 50
+minimum_text_percentage_required: 50
+scroll_delay_range: [2, 4]
 
-# Creator analysis settings
-posts_per_creator: 5  # Number of posts to analyze per creator
-
-# Engagement criteria
-minimum_comments_required: 50  # Minimum comments required
-minimum_text_percentage_required: 50  # Minimum text-based percentage
-
-# Scrolling settings
-scroll_delay_range: [2, 4]  # Random delay range in seconds
-
-# Browser settings
 browser:
-  headless: false  # Run browser in headless mode
-  slow_mode: 2  # Additional delay in seconds
+  headless: false                          # true hides the browser window
+  slow_mode: 2                             # extra delay (seconds) to avoid detection
 
-# Output paths
 output:
   posts_csv: "output/posts.csv"
   creators_csv: "output/creators.csv"
 ```
 
-## How to Run
+---
 
-1. Ensure all dependencies are installed
-2. Create `.env` file with Instagram credentials (or set in config.yaml)
-3. Configure `config/config.yaml` if needed
-4. Run the script from the `src/` directory:
+## Running the pipeline
+
+Run the stages in order — each one reads outputs the previous stage wrote.
+
+```bash
+# Stage 1 + 2: scrape Instagram, classify comments, compute EQS
+cd src
+python scraper.py
+
+# Stage 3 (optional, adds sentiment + GenAI features):
+python run_comparison.py         # regex vs. transformer sentiment
+python build_sentiment_eqs.py    # sentiment-adjusted EQS per creator
+python db_setup.py               # load CSVs into output/analytics.db
+
+# Launch the dashboard (from the project root)
+cd ..
+streamlit run dashboard.py
+```
+
+If you only want the core scraper and EQS scores, running `scraper.py` alone
+is enough — the sentiment/SQL/dashboard layer is entirely additive.
+
+To debug login issues in isolation before running the full scraper:
 
 ```bash
 cd src
-python scraper.py
+python test_login.py
 ```
 
-The script will:
-- Log into Instagram
-- Search for the configured keyword
-- Collect initial post URLs (Phase 1)
-- Check each post for Phase-1 criteria
-- For passing posts, analyze the creator's profile (Phase 2)
-- Calculate EQS for each post
-- Generate creator-level summaries
-- Save results to `posts.csv` and `creators.csv`
+---
 
-Progress will be displayed with progress bars and detailed logging.
+## Output files
 
-## Output CSV Formats
+### `posts.csv` (one row per post)
 
-### posts.csv
+| Column | Description |
+|---|---|
+| `creator_handle` | Instagram handle of the post's creator |
+| `post_url` | Full post URL |
+| `total_comments` | Number of comments extracted |
+| `text_percentage` / `emoji_percentage` / `mixed_percentage` | Comment classification breakdown |
+| `unique_commenters_ratio` | Unique commenters ÷ total comments |
+| `EQS` | Engagement Quality Score |
+| `pass` | `"Pass"` / `"Fail"` against the configured engagement criteria |
 
-One row per post with the following columns:
+### `creators.csv` (one row per creator)
 
-- `creator_handle`: Instagram handle of the post creator
-- `post_url`: Full URL of the Instagram post
-- `total_comments`: Total number of comments extracted
-- `text_percentage`: Percentage of text-only comments
-- `emoji_percentage`: Percentage of emoji-only comments
-- `mixed_percentage`: Percentage of mixed comments
-- `unique_commenters_ratio`: Ratio of unique commenters (unique_users / total_comments)
-- `EQS`: Engagement Quality Score
-- `pass`: "Pass" or "Fail" based on engagement criteria
+| Column | Description |
+|---|---|
+| `creator_handle` | Instagram handle |
+| `posts_analyzed` / `posts_passed` | Counts across the creator's analyzed posts |
+| `avg_text_percentage` / `avg_emoji_percentage` / `avg_mixed_percentage` | Averages across posts |
+| `avg_EQS` / `best_EQS` / `worst_EQS` | EQS summary stats |
 
-### creators.csv
+### `comparison_results.csv` (one row per comment)
 
-One row per creator with the following columns:
+Regex classification, transformer sentiment + confidence, and a flag for
+where the two approaches disagree.
 
-- `creator_handle`: Instagram handle
-- `posts_analyzed`: Total number of posts analyzed for this creator
-- `posts_passed`: Number of posts that passed the criteria
-- `avg_text_percentage`: Average text percentage across all posts
-- `avg_emoji_percentage`: Average emoji percentage across all posts
-- `avg_mixed_percentage`: Average mixed percentage across all posts
-- `avg_EQS`: Average Engagement Quality Score
-- `best_EQS`: Highest EQS score among all posts
-- `worst_EQS`: Lowest EQS score among all posts
+### `creators_with_sentiment_eqs.csv` (one row per creator)
 
-## Logging, Error Handling & Progress Tracking
+`creators.csv` joined with aggregated sentiment percentages and a
+sentiment-adjusted EQS.
 
-This project includes comprehensive logging, robust error handling, and real-time progress tracking.
+### `analytics.db`
 
-### Logging System
+SQLite database with one table per CSV above (`posts`, `creators`,
+`comparison_results`, `creators_with_sentiment_eqs`), used by the
+dashboard's natural-language Q&A.
 
-- **Dual Output**: Logs are written to both console and `instagram_scraper.log`
-- **Log Format**: Timestamp, log level, and detailed message
-- **Comprehensive Coverage**: All operations are logged
+---
 
-### Error Handling
+## Logging & error handling
 
-- **Try-Except Blocks**: All critical operations are wrapped
-- **Specific Exception Handling**: TimeoutException, NoSuchElementException, etc.
-- **Graceful Degradation**: Multiple fallback selectors and alternative methods
-- **Error Recovery**: Automatic retries with different selectors
-- **Debugging Files**: Screenshots and page source saved on errors
+- Every run logs to both the console and `instagram_scraper.log`
+  (timestamp, level, message)
+- Selenium operations use multiple fallback selectors and retry logic
+- On error, the scraper saves a screenshot and page source for debugging
+  (see the `login_error_*.png` files in `src/` as examples)
+- Progress bars (`tqdm`) show live progress through Stage 1 and Stage 2
 
-### Progress Tracking
-
-- **Progress Bars**: Visual progress indicators for Phase-1 and Phase-2
-- **Progress Logging**: Detailed progress messages
-- **Summary Statistics**: Complete summary at the end
+---
 
 ## Troubleshooting
 
-### Rate Limits & Blocked Requests
+**Rate limits / blocked requests**
+- Increase `browser.slow_mode` in `config.yaml` (try 5–10 seconds)
+- Reduce `number_of_initial_posts_to_scan` and `posts_per_creator`
+- Wait a while before retrying if temporarily blocked
 
-**Solutions:**
-1. Increase `slow_mode` in `config.yaml` (e.g., set to 5-10 seconds)
-2. Reduce `number_of_initial_posts_to_scan` and `posts_per_creator`
-3. Add delays between actions
-4. Use a VPN or different IP address
-5. Wait 24 hours if temporarily blocked
+**Login issues**
+- Run `python src/test_login.py` in isolation first
+- Double-check `.env` values
+- Inspect the generated `login_error_*.png` screenshots and page source
+- See `LOGIN_TROUBLESHOOTING.md` for a fuller walkthrough
 
-### Login Issues
+**Slow loading / timeouts**
+- Check your connection and Chrome/ChromeDriver version match
+- Run with `browser.headless: false` to watch what's happening
+- Reduce the number of posts processed per run
 
-**Quick Debug:**
-1. Run the test script first:
-   ```bash
-   python test_login.py
-   ```
+See `QUICK_START.md` and `PHASE2_QUICKSTART.md` for additional walkthroughs.
 
-**Solutions:**
-1. Verify credentials in `.env` file or `config.yaml`
-2. Check generated files: `login_error_*.png` screenshots
-3. Check `login_page_source.html` for error messages
-4. Wait before retrying if rate-limited
+---
 
-### Slow Loading / Timeout Errors
+## Notes & limitations
 
-**Solutions:**
-1. Check internet connection
-2. Increase timeout values in the code
-3. Reduce number of posts to process
-4. Run in non-headless mode to see what's happening
-5. Update ChromeDriver to match your Chrome version
-
-## Best Practices
-
-1. **Respect Rate Limits**: Don't scrape too aggressively
-2. **Use Delays**: The script includes random delays to appear more human-like
-3. **Monitor Logs**: Check `instagram_scraper.log` for detailed operation history
-4. **Test Small First**: Start with small numbers to test before larger runs
-5. **Keep Updated**: Instagram changes frequently; update selectors as needed
-6. **Legal Compliance**: Ensure you comply with Instagram's Terms of Service
-
-## Code Architecture
-
-- **`src/scraper.py`**: Main Phase-2 orchestration script
-- **`src/comment_classifier.py`**: Comment classification using regex
-- **`src/post_analyzer.py`**: Post analysis and EQS calculation
-- **`src/creator_analyzer.py`**: Creator-level analysis and aggregation
-- **`src/utils.py`**: Reusable utility functions (config, driver, login, CSV)
-- **`config/config.yaml`**: Centralized configuration
-- **Modular design**: Easy to extend and maintain
+- Instagram's UI changes often; Selenium selectors may need updates over time
+- Anti-detection delays are built in, but rate limiting can still happen
+- `unique_commenters_ratio` is approximated from unique comment text rather
+  than parsed usernames
+- `query_engine.py` validates generated SQL is read-only before executing it
+  against `analytics.db`, but treat the Gemini API key like any other secret
+- For production-scale or long-term use, prefer Instagram's official API
+  over scraping
 
 ## Dependencies
 
-- **selenium**: Browser automation
-- **python-dotenv**: Environment variable management
-- **pyyaml**: YAML configuration parsing
-- **pandas**: CSV data handling
-- **tqdm**: Progress bars
-
-## Notes
-
-- Instagram's UI changes frequently; XPath selectors may need updates
-- The script includes anti-detection measures but may still trigger rate limits
-- For production use, consider Instagram's official API
-- Always respect Instagram's Terms of Service and robots.txt
-- Unique commenters ratio is approximated using unique comments (exact username extraction requires additional DOM parsing)
+- `selenium` — browser automation
+- `python-dotenv` — environment variable loading
+- `pyyaml` — config parsing
+- `pandas` — CSV/data handling
+- `tqdm` — progress bars
+- `transformers`, `torch` — transformer sentiment model
+- `streamlit`, `plotly` — dashboard and charts
+- `google-genai` — Gemini API client for natural-language Q&A
 
 ## License
 
-This project is for educational purposes. Use responsibly and in compliance with Instagram's Terms of Service.
+This project is for educational purposes. Use responsibly and in compliance
+with Instagram's Terms of Service.
