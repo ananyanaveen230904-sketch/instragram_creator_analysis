@@ -100,6 +100,8 @@ instragram_creator_analysis/
 │   ├── comparison_results.csv
 │   ├── creators_with_sentiment_eqs.csv
 │   └── analytics.db
+├── docs/
+│   └── screenshots/               # Dashboard screenshots used in this README
 ├── QUICK_START.md
 ├── PHASE2_QUICKSTART.md
 ├── LOGIN_TROUBLESHOOTING.md
@@ -195,6 +197,69 @@ To debug login issues in isolation before running the full scraper:
 cd src
 python test_login.py
 ```
+
+---
+
+## Dashboard preview
+
+The Streamlit dashboard (`dashboard.py`) has five pages, listed below with a
+screenshot of each.
+
+### Overview
+
+High-level snapshot of the whole run: total comments, disagreement rate,
+average transformer confidence, creators/posts analyzed, EQS vs. comment
+volume, and the EQS distribution across all posts.
+
+![Overview page](docs/screenshots/overview.png)
+
+### Regex vs. Transformer
+
+Side-by-side comparison of the original regex-based comment classifier
+(text / emoji / mixed) against the transformer sentiment model's output
+distribution (positive / neutral / negative).
+
+![Regex vs Transformer classification](docs/screenshots/regex_vs_transformer.png)
+
+Where the two methods land per regex label, broken down by transformer
+sentiment:
+
+![Regex label vs transformer sentiment crosstab](docs/screenshots/disagreement_crosstab.png)
+
+Confidence scores from the transformer model — most predictions cluster
+above 0.9:
+
+![Transformer confidence distribution](docs/screenshots/confidence_distribution.png)
+
+### Disagreements
+
+Summary of every case where the regex classifier and the transformer model
+disagreed (42% of comments in this run), broken down by reason:
+
+![Flagged disagreements summary](docs/screenshots/disagreements_summary.png)
+
+A searchable, filterable table of every flagged comment, with both labels
+and the transformer's confidence score:
+
+![Browse flagged comments table](docs/screenshots/browse_flagged_comments.png)
+
+### Creators & EQS
+
+Original EQS vs. sentiment-adjusted EQS per creator, each creator's
+sentiment mix, the best/average/worst EQS range across their posts, and the
+full underlying table:
+
+![EQS range per creator](docs/screenshots/eqs_range_per_creator.png)
+
+![Original vs sentiment-adjusted EQS and full creator table](docs/screenshots/creators_eqs_table.png)
+
+### Ask AI
+
+Natural-language Q&A over the SQLite database — questions are turned into
+SQL by Gemini, validated as read-only, executed, and answered in plain
+English.
+
+![Ask AI page](docs/screenshots/ask_ai.png)
 
 ---
 
